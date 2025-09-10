@@ -4,6 +4,8 @@ from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
+from pyspark.sql import DataFrame, Row
+from pyspark.sql.functions import *
 
 args = getResolvedOptions(sys.argv, ["JOB_NAME"])
 sc = SparkContext()
@@ -26,20 +28,39 @@ AccelerometerTrusted_node2 = glueContext.create_dynamic_frame.from_catalog(
     transformation_ctx="AccelerometerTrusted_node2",
 )
 
-# Script generated for node SQL Join
-SqlJoin_node3 = sparkSqlQuery(
-    glueContext,
-    query="SELECT st.sensorreadingtime, st.serialnumber, st.distancefromobject, a.user, a.x, a.y, a.z FROM myDataSource1 st JOIN myDataSource2 a ON st.sensorreadingtime = a.timestamp",
-    mapping={
-        "myDataSource1": StepTrainerTrusted_node1,
-        "myDataSource2": AccelerometerTrusted_node2,
-    },
-    transformation_ctx="SqlJoin_node3",
+# Convert DynamicFrames to DataFrames for SQL operations
+step_trainer_df = StepTrainerTrusted_node1.toDF()
+accelerometer_df = AccelerometerTrusted_node2.toDF()
+
+# Create temporary views for SQL query
+step_trainer_df.createOrReplaceTempView("step_trainer_trusted")
+accelerometer_df.createOrReplaceTempView("accelerometer_trusted")
+
+# SQL query with correct lowercase column names
+joined_df = spark.sql("""
+    SELECT 
+        st.sensorreadingtime,
+        st.serialnumber,
+        st.distancefromobject,
+        a.user,
+        a.x,
+        a.y,
+        a.z
+    FROM step_trainer_trusted st
+    INNER JOIN accelerometer_trusted a 
+    ON st.sensorreadingtime = a.timestamp
+""")
+
+# Convert DataFrame back to DynamicFrame
+SqlJoin_node3 = glueContext.create_dynamic_frame.from_rdd(
+    joined_df.rdd,
+    name="SqlJoin_node3",
+    transformation_ctx="SqlJoin_node3"
 )
 
 # Script generated for node Machine Learning Curated
 MachineLearningCurated_node4 = glueContext.getSink(
-    path="s3://udacity-project-jimmy/machine-learning/",
+    path="s3://udacity-project-jimmy/machine_learning/curated/",
     connection_type="s3",
     updateBehavior="UPDATE_IN_DATABASE",
     partitionKeys=[],
